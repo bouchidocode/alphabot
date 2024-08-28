@@ -1,7 +1,6 @@
 import os
 import requests
 import schedule
-import time
 import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
@@ -18,12 +17,12 @@ async def fetch_raffles():
     response = requests.get('https://api.alphabot.app/v1/raffles', headers=headers)
     if response.ok:
         raffles = response.json().get('data', {}).get('raffles', [])
-        return raffles
+        return [raffle for raffle in raffles if raffle['status'] == 'active']
     else:
         print('Failed to fetch raffles.')
         return []
 
-# Register for a raffle using its slug
+# Enter a raffle using its slug
 async def enter_raffle(raffle_slug):
     url = 'https://api.alphabot.app/v1/register'
     headers = {'Authorization': f'Bearer {ALPHABOT_API_KEY}', 'Content-Type': 'application/json'}
@@ -35,38 +34,36 @@ async def enter_raffle(raffle_slug):
     else:
         print(f'Failed to enter raffle: {raffle_slug}')
 
-# Function to automatically enter all active raffles
+# Enter all active raffles automatically
 async def automatic_raffle_entry():
     raffles = await fetch_raffles()
     for raffle in raffles:
-        if raffle['status'] == 'active':
-            await enter_raffle(raffle['slug'])
+        await enter_raffle(raffle['slug'])
 
-# Scheduled task runner for entering raffles
-def run_scheduled_raffle_entry():
+# Schedule the raffle entry
+def schedule_raffle_entries():
     asyncio.run(automatic_raffle_entry())
 
-# Start command triggered by Telegram
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('Bot is running and will automatically enter raffles every 2 hours.')
+# Command to start the bot
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text('Bot is active and will enter raffles every 2 hours.')
 
-# Main function to initialize and run the bot
+# Main function to configure and run the bot
 async def main():
-    # Initialize the Application
+    # Initialize the application
     application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     
-    # Add a command handler for '/start'
+    # Add command for start
     application.add_handler(CommandHandler("start", start))
     
-    # Schedule raffle entry task every 2 hours
-    schedule.every(2).hours.do(run_scheduled_raffle_entry)
+    # Schedule entry every 2 hours
+    schedule.every(2).hours.do(schedule_raffle_entries)
 
-    # Start the polling loop
-    await application.initialize()  # Make sure initialization is explicitly called
+    # Start the bot
+    await application.initialize()
     await application.start()
-    await application.updater.start_polling()
+    application.updater.start_polling()
 
-    # Continuously check the schedule
     while True:
         schedule.run_pending()
         await asyncio.sleep(1)
