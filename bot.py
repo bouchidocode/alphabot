@@ -2,18 +2,18 @@ import os
 import requests
 import schedule
 import time
-from telegram import Bot
-from telegram.ext import Updater, CommandHandler, CallbackContext
+import asyncio
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
-
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 ALPHABOT_API_KEY = os.getenv('ALPHABOT_API_KEY')
 
-def fetch_raffles():
-    """Fetch the list of raffles to find available ones."""
+# Fetch raffles from Alphabot API
+async def fetch_raffles():
     headers = {'Authorization': f'Bearer {ALPHABOT_API_KEY}'}
     response = requests.get('https://api.alphabot.app/v1/raffles', headers=headers)
     if response.ok:
@@ -23,45 +23,56 @@ def fetch_raffles():
         print('Failed to fetch raffles.')
         return []
 
-def enter_raffle(raffle_slug):
-    """Enter a specific raffle by slug."""
+# Register for a raffle using its slug
+async def enter_raffle(raffle_slug):
     url = 'https://api.alphabot.app/v1/register'
     headers = {'Authorization': f'Bearer {ALPHABOT_API_KEY}', 'Content-Type': 'application/json'}
     data = {'slug': raffle_slug}
-    
+
     response = requests.post(url, json=data, headers=headers)
     if response.ok:
         print(f'Successfully entered raffle: {raffle_slug}')
     else:
         print(f'Failed to enter raffle: {raffle_slug}')
 
-def automatic_raffle_entry():
-    """Automatically enter all available raffles."""
-    raffles = fetch_raffles()
+# Function to automatically enter all active raffles
+async def automatic_raffle_entry():
+    raffles = await fetch_raffles()
     for raffle in raffles:
         if raffle['status'] == 'active':
-            enter_raffle(raffle['slug'])
+            await enter_raffle(raffle['slug'])
 
-def start(update, context: CallbackContext):
-    update.message.reply_text('Bot is running and will automatically enter raffles every 2 hours.')
+# Scheduled task runner for entering raffles
+def run_scheduled_raffle_entry():
+    asyncio.run(automatic_raffle_entry())
 
-def run_bot():
-    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
-    dp = updater.dispatcher
-    dp.add_handler(CommandHandler("start", start))
+# Start command triggered by Telegram
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text('Bot is running and will automatically enter raffles every 2 hours.')
 
-    # Start the bot
-    updater.start_polling()
+# Main function to initialize and run the bot
+async def main():
+    # Initialize the Application
+    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    
+    # Add a command handler for '/start'
+    application.add_handler(CommandHandler("start", start))
+    
+    # Schedule raffle entry task every 2 hours
+    schedule.every(2).hours.do(run_scheduled_raffle_entry)
 
-    # Schedule automatic raffle entries
-    schedule.every(2).hours.do(automatic_raffle_entry)
+    # Start the polling loop
+    await application.initialize()  # Make sure initialization is explicitly called
+    await application.start()
+    await application.updater.start_polling()
 
+    # Continuously check the schedule
     while True:
         schedule.run_pending()
-        time.sleep(1)
+        await asyncio.sleep(1)
 
-    # Keeps bot running
-    updater.idle()
+    await application.stop()
 
+# Execute the main function
 if __name__ == '__main__':
-    run_bot()
+    asyncio.run(main())
